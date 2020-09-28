@@ -5,6 +5,7 @@ Created on Thu Sep 17 15:54:14 2020
 @author: niels
 """
 from convert_files import convert_pdfs
+from scroll_pdf import pdf_canvas
 import tkinter as tk
 import re
 import pandas as pd
@@ -15,6 +16,9 @@ import os
 def c(col,row):
     abc = list("0ABCDEFGHIJKLMNO")
     return abc[col]+str(row)
+
+def sstr(s):
+    return s.encode('ascii', errors='ignore').decode('utf-8')
 
 class pre_interface(tk.Frame):
     '''The interface that helps to make the names.txt and questions.txt file.'''
@@ -44,7 +48,7 @@ class pre_interface(tk.Frame):
         self.enter.bind("<Leave>", self.enter_leave)
     
     def enter_layout(self):
-        self.names = self.name.get("1.0",'end-1c').strip().split("\n")
+        self.names = self.name.get("1.0",'end-1c').encode('utf-8').strip().split("\n")
         self.sheets = self.sheet.get("1.0",'end-1c').strip().split("\n")
         self.names.sort()
         
@@ -85,12 +89,14 @@ class gui(tk.Frame):
                  names,
                  sheets,
                  sheet_names,
+                 path,
                  file_scoring):
         tk.Frame.__init__(self, parent)
         self.parent = parent
         self.names = names
         self.sheets = sheets
         self.sheet_names = sheet_names
+        self.path = path
         self.file_scoring = file_scoring
         
         self.RW, self.RH      = 640,240;
@@ -132,6 +138,7 @@ class gui(tk.Frame):
             self.no_deduction   : (1,2),
             }
         
+        
         self.initial = True
         self.sheet = self.sheets[0]
         self.name = self.names[0]
@@ -140,6 +147,15 @@ class gui(tk.Frame):
         self.options[0].focus()
         self.bind_keys()
         self.initial = False
+        
+        self.new_grade_option()
+        self.new_grade_option()
+        
+        self.pack()
+        self.pdf_obj = pdf_canvas(self.parent, self.path + "\\" + sstr(self.name) + ".pdf")
+        self.pdf_frame,self._pdf = self.pdf_obj.get_canvas()
+        self.pdf_frame.pack(side = tk.BOTTOM, anchor = tk.N)
+        self.parent.move(self.pdf_obj,0,-self.Rh(.5))
     
     def refresh_grid(self, dic):
         for item,data in dic.items():
@@ -192,7 +208,7 @@ class gui(tk.Frame):
                     option.destroy()
             
             #set person and sheet button text
-            self.name_lb["text"] = self.name_txt + self.name
+            self.name_lb["text"] = self.name_txt + sstr(self.name)
             self.sheet_lb["text"] = self.sheet_txt + self.sheet_names[self.sheet]
             
             #get options
@@ -211,6 +227,7 @@ class gui(tk.Frame):
             self.get_current_options()
         finally:
             wb.close()
+        
         self.update_screensize()
     
     def get_current_options(self):
@@ -281,6 +298,11 @@ class gui(tk.Frame):
         
         self.update_screensize()
     
+    def set_pdf(self):
+        file = self.path + "\\" + sstr(self.name) + ".pdf"
+        
+        self.pdf_frame,self._pdf = self.pdf_obj.change_canvas(file)
+    
     def next_person(self):
         if self.names.index(self.name) == len(self.names)-1:
             print("this is the last person")
@@ -288,6 +310,7 @@ class gui(tk.Frame):
             self.name = self.names[self.names.index(self.name)+1]
             self.name_lb["text"] = self.name_txt + self.name
             self.get_current_options()
+            self.set_pdf()
     
     def prev_person(self):
         if self.names.index(self.name) == 0:
@@ -296,6 +319,7 @@ class gui(tk.Frame):
             self.name = self.names[self.names.index(self.name)-1]
             self.name_lb["text"] = self.name_txt + self.name
             self.get_current_options()
+            self.set_pdf()
     
     def next_sheet(self):
         if self.sheets.index(self.sheet) == len(self.sheets)-1:
@@ -304,7 +328,6 @@ class gui(tk.Frame):
             self.sheet = self.sheets[self.sheets.index(self.sheet)+1]
             self.sheet_lb["text"] = self.sheet_txt + self.sheet
             self.get_sheet()
-            self.update_screensize()
     
     def prev_sheet(self):
         if self.sheets.index(self.sheet) == 0:
@@ -313,13 +336,12 @@ class gui(tk.Frame):
             self.sheet = self.sheets[self.sheets.index(self.sheet)-1]
             self.sheet_lb["text"] = self.sheet_txt + self.sheet
             self.get_sheet()
-            self.update_screensize()
     
     def update_screensize(self):
         ww, hh = self.grid_size()
         ww = (ww) * self.Rw(.26) + 2*self.PADX
         hh = (hh-int(not self.new_option_make)+int(self.initial)) * self.Rh(.5) + 2*self.PADY
-        self.parent.geometry(str(ww) + 'x' + str(hh))
+        # self.parent.geometry(str(ww) + 'x' + str(hh))
     
     def _new_option(self,e):
         #press n for new options
@@ -329,19 +351,20 @@ class gui(tk.Frame):
         
     def _next(self,e):
         #next focus
-        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
-            return
         current = self.parent.focus_get()
-        if current in self.options[:-1]:
+        if current == self.no_description or current == self.no_deduction:
+            return
+        elif current in self.options[:-1]:
             self.options[self.options.index(current)+1].focus()
         else:
             self.options[0].focus()
+            
     def _prev(self,e):
         #prev focus
-        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
-            return
         current = self.parent.focus_get()
-        if current in self.options[1:]:
+        if current == self.no_description or current == self.no_deduction:
+            return
+        elif current in self.options[1:]:
             self.options[self.options.index(current)-1].focus()
         else:
             self.options[-1].focus()
@@ -359,7 +382,9 @@ class gui(tk.Frame):
             self.parent.focus()
         elif self.name != self.names[-1]:
             self.next_person()
+            self.options[0].focus()
         elif self.sheet != self.sheets[-1]:
+            self.name = self.names[0]
             self.next_sheet()
             self.options[0].focus()
         else:
@@ -372,6 +397,7 @@ class gui(tk.Frame):
         self.parent.bind("j",self._prev)
         self.parent.bind("k",self._next)
         self.parent.bind("<space>",self._space)
+    pass
     
 class app():
     def __init__(self, 
@@ -390,14 +416,13 @@ class app():
         self.names = []
         self.sheets = []
         self.sheet_names = []
+        
+        self.gui = None
     
     def path_end_backslash(self):
         '''adds a backslash to the path if necessary'''
-        print(self.path)
         if self.path[-1] != "\\":
             self.path += "\\"
-        
-        print(self.path)
         return(self.path)
     
     def get_names_and_sheets(self, path):
@@ -459,8 +484,8 @@ class app():
         if self.sheets == []:
             root = tk.Tk();
             root.title(self.title)
-            pre_app = pre_interface(root, self.names, self.sheets, self.path)
-            pre_app.pack()
+            self.gui = pre_interface(root, self.names, self.sheets, self.path)
+            self.gui.pack()
             root.mainloop()
         
         self.split_sheet_names()
@@ -534,8 +559,9 @@ class app():
     def run(self):
         root = tk.Tk();
         root.title(self.title)
-        app_gui = gui(root, self.names, self.sheets, self.sheet_names, self.file_scoring)
-        app_gui.pack()
+        self.window = tk.Canvas(root, height=1000, width=1000)
+        self.gui = gui(self.window, self.names, self.sheets, self.sheet_names, 
+                      self.path+self.folder, self.file_scoring)
         root.mainloop()
         
 if __name__ == "__main__":

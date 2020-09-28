@@ -11,6 +11,9 @@ import re
 import zipfile
 from shutil import rmtree
 
+def sstr(s):
+    return s.encode('ascii', errors='ignore').decode('utf-8')
+
 class convert_pdfs():
     def __init__(self, path):
         self.path = path
@@ -59,10 +62,12 @@ class convert_pdfs():
         pdf_files.sort(key = lambda x: x[0])
         
         for name,dirpath,file in py_files:
+            name = sstr(name)
             os.rename(dirpath+"\\"+file,self.path+"\\"+name+".py")
             pass
             
         for name,dirpath,file in pdf_files:
+            name = sstr(name)
             os.rename(dirpath+"\\"+file,self.path+"\\"+name+".pdf")
             self.names.append(name)
     
