@@ -6,12 +6,15 @@ Created on Thu Sep 17 15:54:14 2020
 """
 from convert_files import convert_pdfs
 from scroll_pdf import pdf_canvas
+from produce_feedback import excel_feedback
 import tkinter as tk
 import re
 import pandas as pd
 import openpyxl as oxl
 from win32com.client import Dispatch
 import os
+import shutil
+# import traceback
 
 def c(col,row):
     abc = list("0ABCDEFGHIJKLMNO")
@@ -90,7 +93,8 @@ class gui(tk.Frame):
                  sheets,
                  sheet_names,
                  path,
-                 file_scoring):
+                 file_scoring,
+                 answer_pdf):
         tk.Frame.__init__(self, parent)
         self.parent = parent
         self.names = names
@@ -98,6 +102,7 @@ class gui(tk.Frame):
         self.sheet_names = sheet_names
         self.path = path
         self.file_scoring = file_scoring
+        self.answer_pdf = answer_pdf
         
         self.RW, self.RH      = 640,240;
         self.Rw = lambda f : int(f*self.RW); 
@@ -114,10 +119,12 @@ class gui(tk.Frame):
         self.sheet_forward     = tk.Button(self,text="next question", command = self.next_sheet)
         self.sheet_backward    = tk.Button(self,text="prev question", command = self.prev_sheet)
         
-        self.new_option  = tk.Button(self,text="NEW GRADING OPTION", command = self.new_grade_option)
+        self.new_option  = tk.Button(self,text="NEW GRADING OPTION\n(max 7)", command = self.new_grade_option)
         self.new_option_make = False
         self.no_description = tk.Text(self,height = 6, width = 4)
         self.no_deduction   = tk.Entry(self)
+
+        self.new_remark_make = False
         
         #data = x,y,colspan,rowspan
         #or
@@ -134,8 +141,8 @@ class gui(tk.Frame):
             }
         
         self.no_items = {
-            self.no_description : (0,2),
-            self.no_deduction   : (1,2),
+            self.no_description : (6,0),
+            self.no_deduction   : (7,0),
             }
         
         
@@ -152,10 +159,27 @@ class gui(tk.Frame):
         self.new_grade_option()
         
         self.pack()
-        self.pdf_obj = pdf_canvas(self.parent, self.path + "\\" + sstr(self.name) + ".pdf")
+        
+        self.doc_frame = tk.Frame(self.parent)
+        
+        #pdf of answers
+        self.answer_obj = pdf_canvas(self.doc_frame, self.answer_pdf, zoom = 5)
+        self.answer_frame,self._answer = self.answer_obj.get_canvas()
+        self.answer_frame.pack(side = tk.RIGHT, anchor = tk.NE)
+        
+        #pdf of person
+        self.zoom = 5
+        pdf0 = self.path + "\\" + sstr(self.name) + ".pdf"
+        self.pdf_obj = pdf_canvas(self.doc_frame, pdf0, zoom = self.zoom)
+        self.pdf_obj.func_image = self.pdf_obj.get_jpg #for faster pdf loading
         self.pdf_frame,self._pdf = self.pdf_obj.get_canvas()
-        self.pdf_frame.pack(side = tk.BOTTOM, anchor = tk.N)
-        self.parent.move(self.pdf_obj,0,-self.Rh(.5))
+
+        self.pdf_frame.pack(side = tk.LEFT, anchor = tk.NW)
+        self.pdf_obj.scroll_bar.pack_forget()
+        self.pdf_obj.scroll_bar.pack(side = tk.RIGHT, fill = tk.Y)
+        self.pdf_yscroll = [0 for _ in names]
+        
+        self.doc_frame.pack(side = tk.BOTTOM)
     
     def refresh_grid(self, dic):
         for item,data in dic.items():
@@ -250,6 +274,8 @@ class gui(tk.Frame):
             wb.close()
     
     def new_grade_option(self):
+        if self.new_remark_make:
+            return
         if self.new_option_make:
             description = self.no_description.get("1.0",tk.END).strip()
             deduction = self.no_deduction.get().strip()
@@ -277,19 +303,16 @@ class gui(tk.Frame):
                             
                             print("Added new option")
                             
-                            self.no_description.delete("1.0",tk.END)
-                            self.no_deduction.delete(0,tk.END)
                             break
                         elif col == 9:
-                            self.no_description.delete("1.0",tk.END)
-                            self.no_deduction.delete(0,tk.END)
                             print("Max options (7) reached")
                             break
-                    
                 finally:
                     wb.save(self.file_scoring)
                     wb.close()
             
+            self.no_description.delete("1.0",tk.END)
+            self.no_deduction.delete(0,tk.END)
             self.new_option_make = False
         else:
             self.refresh_grid(self.no_items)
@@ -298,28 +321,74 @@ class gui(tk.Frame):
         
         self.update_screensize()
     
+    def new_remark(self):
+        if self.new_option_make:
+            return
+        if self.new_remark_make:
+            remark = self.no_description.get("1.0",tk.END).strip()
+            self.no_description.grid_remove()
+            
+            try:
+                wb = oxl.load_workbook(self.file_scoring)
+                ws = wb[self.sheet]
+                
+                ws[c(12,self.names.index(self.name)+3)] = remark           
+            finally:
+                wb.save(self.file_scoring)
+                wb.close()
+            
+            self.no_description.delete("1.0",tk.END)
+            self.new_remark_make = False
+        else:
+            self.refresh_grid({k:self.no_items[k] for k in self.no_items if k == self.no_description})
+            
+            try:
+                wb = oxl.load_workbook(self.file_scoring)
+                ws = wb[self.sheet]
+                
+                val = ws[c(12,self.names.index(self.name)+3)].value  
+                if val != None:
+                    self.no_description.insert(1.0, val)
+            finally:
+                    wb.save(self.file_scoring)
+                    wb.close()     
+                    
+            self.no_description.focus()
+            self.new_remark_make = True
+        
+        self.update_screensize()
+    
     def set_pdf(self):
         file = self.path + "\\" + sstr(self.name) + ".pdf"
         
         self.pdf_frame,self._pdf = self.pdf_obj.change_canvas(file)
+        i = self.names.index(self.name)
+        self.pdf_obj.canvas.yview_moveto(self.pdf_yscroll[i])
+    
+    def save_pdf_scroll(self):
+        i = self.names.index(self.name)
+        self.pdf_yscroll[i] = self.pdf_obj.canvas.yview()[0]
+    
+    def change_to_person(self, i):
+        self.save_pdf_scroll()
+        self.name = self.names[i]
+        self.name_lb["text"] = self.name_txt + self.name
+        self.get_current_options()
+        self.set_pdf()
     
     def next_person(self):
         if self.names.index(self.name) == len(self.names)-1:
-            print("this is the last person")
+            i = 0
         else:
-            self.name = self.names[self.names.index(self.name)+1]
-            self.name_lb["text"] = self.name_txt + self.name
-            self.get_current_options()
-            self.set_pdf()
+            i = self.names.index(self.name)+1
+        self.change_to_person(i)
     
     def prev_person(self):
         if self.names.index(self.name) == 0:
-            print("this is the first person")
+            i = len(self.names)-1
         else:
-            self.name = self.names[self.names.index(self.name)-1]
-            self.name_lb["text"] = self.name_txt + self.name
-            self.get_current_options()
-            self.set_pdf()
+            i = self.names.index(self.name)-1
+        self.change_to_person(i)
     
     def next_sheet(self):
         if self.sheets.index(self.sheet) == len(self.sheets)-1:
@@ -349,6 +418,12 @@ class gui(tk.Frame):
             return
         self.new_grade_option()
         
+    def _new_remark(self,e):
+        #press m for edit remark
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.new_remark()
+        
     def _next(self,e):
         #next focus
         current = self.parent.focus_get()
@@ -369,14 +444,13 @@ class gui(tk.Frame):
         else:
             self.options[-1].focus()
         
-    def _space(self,e):
-        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
-            return
-        self.parent.focus_get()["command"]
-    
-    def _enter_next(self,e):
+    def _goto_next(self,e):
         if self.parent.focus_get() == self.no_description:
-            self.no_deduction.focus()
+            if self.new_remark_make:
+                self.new_remark()
+                self.parent.focus()
+            else:
+                self.no_deduction.focus()
         elif self.parent.focus_get() == self.no_deduction:
             self.new_grade_option()
             self.parent.focus()
@@ -384,19 +458,67 @@ class gui(tk.Frame):
             self.next_person()
             self.options[0].focus()
         elif self.sheet != self.sheets[-1]:
-            self.name = self.names[0]
             self.next_sheet()
+            self.change_to_person(0)
             self.options[0].focus()
         else:
             print("All finished")
             self.parent.destroy()
+    
+    def _select_option(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.parent.focus_get()["command"]
             
+    def _zoom_in(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.zoom += 1
+        self.pdf_frame,self._pdf = self.pdf_obj.change_size(self.zoom)
+    
+    def _zoom_out(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.zoom -= 1
+        self.pdf_frame,self._pdf = self.pdf_obj.change_size(self.zoom)
+        
+    def _scroll_up(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        e.delta = 120
+        self.pdf_obj.func_scroll(e)
+        
+    def _scroll_down(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        e.delta = -120
+        self.pdf_obj.func_scroll(e)
+    
+    def _scroll_up_answer(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        e.delta = 120
+        self.answer_obj.func_scroll(e)
+        
+    def _scroll_down_answer(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        e.delta = -120
+        self.answer_obj.func_scroll(e)
+    
     def bind_keys(self):
-        self.parent.bind("<Return>",self._enter_next)
-        self.parent.bind("n",self._new_option)
+        self.parent.bind("<Return>",self._goto_next)
         self.parent.bind("j",self._prev)
         self.parent.bind("k",self._next)
-        self.parent.bind("<space>",self._space)
+        self.parent.bind("<space>",self._select_option)
+        self.parent.bind("n",self._new_option)
+        self.parent.bind("m",self._new_remark)
+        self.parent.bind("r",self._scroll_up)
+        self.parent.bind("f",self._scroll_down)
+        self.parent.bind("t",self._scroll_up_answer)
+        self.parent.bind("g",self._scroll_down_answer)
+        # self.parent.bind("<Up>",self._zoom_in)
+        # self.parent.bind("<Down>",self._zoom_out)
     pass
     
 class app():
@@ -413,6 +535,8 @@ class app():
         self.file_scoring = path+superfolder+file_scoring
         self.path = path+superfolder
         self.folder = folder
+        self.answer_pdf = input(f"Make sure you have your answers pdf-file relative in ...{self.path[-25:]}.\nIf it is 'answers.pdf' proceed, else what is its name?:\n")
+        self.answer_pdf = self.path+"answers.pdf" if self.answer_pdf == "" else self.path+self.answer_pdf
         self.names = []
         self.sheets = []
         self.sheet_names = []
@@ -550,8 +674,8 @@ class app():
                         if len(self.names) == row-3:
                             break
                         wb[sheet][c(1,row)] = names[row-3]
-            except:
-                print("Error could not fill sheets")
+            except Exception as e:
+                print("Error could not fill sheets: ", e)
             finally:
                 wb.save(self.file_scoring)
                 wb.close()
@@ -559,28 +683,48 @@ class app():
     def run(self):
         root = tk.Tk();
         root.title(self.title)
-        self.window = tk.Canvas(root, height=1000, width=1000)
-        self.gui = gui(self.window, self.names, self.sheets, self.sheet_names, 
-                      self.path+self.folder, self.file_scoring)
+        self.gui = gui(root, self.names, self.sheets, self.sheet_names, 
+                      self.path+self.folder, self.file_scoring, self.answer_pdf)
         root.mainloop()
         
-if __name__ == "__main__":
-    path = r"C:\Users\niels\OneDrive\OneDriveDocs\TA\Numerical Methods\student results" + "\\"
-    file_template = "scoring_template.xlsx"
-    file_scoring = "scores_week3.xlsx"
-    superfolder = r"week3" + "\\"    
-    folder = r"Assignment 2 Download 21 September, 2020 1622"
-    
+def run_convert():
+    global names,convert_obj
     convert_obj = convert_pdfs(path+superfolder+folder)
     names = convert_obj.convert()
     
     with open(path+superfolder+"names.txt",'w',encoding='utf-8') as f:
         for name in names:
             f.write(name+"\n")
-    
+
+def run_app():
+    global app
     app = app(path,superfolder,folder,file_template,file_scoring)
     app.pre_dialog()
     app.make_excel()
     app.run()
+
+def run_feedback():
+    global fb
+    fb = excel_feedback(path+superfolder, file_scoring)
+    fb.make_feedback()
+    feedback_folder = path+superfolder+"feedback_files"
+    if os.path.isdir(feedback_folder):
+        shutil.rmtree(feedback_folder)
+    os.mkdir(feedback_folder)
+    fb.write_txts(feedback_folder+"\\")
+    
+if __name__ == "__main__":
+    TIMELINESS = True
+    
+    path = r"C:\Users\niels\OneDrive\OneDriveDocs\TA\Numerical Methods\student results" + "\\"
+    file_template = "scoring_template_timeliness.xlsx" if TIMELINESS else "scoring_template.xlsx" 
+    file_scoring = "scores_intermediate_assignment4.xlsx"
+    superfolder = r"intermediate_assignment4" + "\\"    
+    folder = r"Assignment 4 Download 08 October, 2020 1126"
+    names = None
+    
+    run_convert()
+    run_app()
+    run_feedback()
     
     
