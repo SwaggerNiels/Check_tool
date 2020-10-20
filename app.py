@@ -9,6 +9,7 @@ from scroll_pdf import pdf_canvas
 from produce_feedback import excel_feedback
 import tkinter as tk
 import re
+import numpy as np
 import pandas as pd
 import openpyxl as oxl
 from win32com.client import Dispatch
@@ -94,7 +95,8 @@ class gui(tk.Frame):
                  sheet_names,
                  path,
                  file_scoring,
-                 answer_pdf):
+                 answer_pdf,
+                 py_files = None):
         tk.Frame.__init__(self, parent)
         self.parent = parent
         self.names = names
@@ -173,11 +175,16 @@ class gui(tk.Frame):
         self.pdf_obj = pdf_canvas(self.doc_frame, pdf0, zoom = self.zoom)
         self.pdf_obj.func_image = self.pdf_obj.get_jpg #for faster pdf loading
         self.pdf_frame,self._pdf = self.pdf_obj.get_canvas()
+        self.pdf_seeing_code = 0 #0 = report pdf; 1 = first code file; 2 is second code file; etc.
+        self.py_files = py_files
 
         self.pdf_frame.pack(side = tk.LEFT, anchor = tk.NW)
         self.pdf_obj.scroll_bar.pack_forget()
         self.pdf_obj.scroll_bar.pack(side = tk.RIGHT, fill = tk.Y)
-        self.pdf_yscroll = [0 for _ in names]
+        if self.py_files == None:
+            self.pdf_yscroll = [[0,0] for _ in names]
+        else:
+            self.pdf_yscroll = [[0 for i in range(len(self.py_files)+1)] for _ in names]
         
         self.doc_frame.pack(side = tk.BOTTOM)
     
@@ -196,7 +203,7 @@ class gui(tk.Frame):
             elif len(data) > 2:
                 item.configure(wraplength = str(data[2][0])+'p')
                 if len(item["text"]) > data[2][0]*data[2][1]:
-                    new_text = item["text"][:-3]+"..."
+                    new_text = item["text"][:data[2][0]*data[2][1]]+"..."
                     item.configure(text = new_text)
                 
     def option_toggle(self, i):
@@ -239,8 +246,10 @@ class gui(tk.Frame):
             self.options = [];
             for col in range(3,10):
                 description = ws[c(col,1)].value
+                deduction = ws[c(col,2)].value
                 if description != None:
-                    option = tk.Button(self, text=description, bg="white",
+                    option = tk.Button(self, text="(-"+str(deduction)+")\n"+description, 
+                                       bg="white",
                                        command = lambda x=col-3: self.option_toggle(x))
                     self.options.append(option)
                     self.grid_items[option] = (col-3,1,(self.WL,1))
@@ -291,8 +300,10 @@ class gui(tk.Frame):
                     for col in range(3,10):
                         val = ws[c(col,1)].value
                         if val == None:
-                            option = tk.Button(self, text=description, bg="white"
-                                               ,command = lambda x=col-3: self.option_toggle(x))
+                            option = tk.Button(self, 
+                                               text="(-"+str(deduction)+")\n"+description, 
+                                               bg="white",
+                                               command = lambda x=col-3: self.option_toggle(x))
                             self.options.append(option)
                             self.grid_items[option] = (col-3,1,(self.WL,1))
                             self.grid_items[self.new_option] = (col-2,1,(self.WL,1))
@@ -359,15 +370,20 @@ class gui(tk.Frame):
         self.update_screensize()
     
     def set_pdf(self):
-        file = self.path + "\\" + sstr(self.name) + ".pdf"
+        if self.pdf_seeing_code > 0:
+            file = self.path + "\\" + sstr(self.name) + "_pycode.pdf"
+            if self.py_files != None:
+                file = self.path + "\\" + sstr(self.name) + "_" + self.py_files[self.pdf_seeing_code-1] + "_pycode.pdf"
+        else:
+            file = self.path + "\\" + sstr(self.name) + ".pdf"
         
         self.pdf_frame,self._pdf = self.pdf_obj.change_canvas(file)
         i = self.names.index(self.name)
-        self.pdf_obj.canvas.yview_moveto(self.pdf_yscroll[i])
+        self.pdf_obj.canvas.yview_moveto(self.pdf_yscroll[i][self.pdf_seeing_code])
     
     def save_pdf_scroll(self):
         i = self.names.index(self.name)
-        self.pdf_yscroll[i] = self.pdf_obj.canvas.yview()[0]
+        self.pdf_yscroll[i][self.pdf_seeing_code] = self.pdf_obj.canvas.yview()[0]
     
     def change_to_person(self, i):
         self.save_pdf_scroll()
@@ -391,6 +407,7 @@ class gui(tk.Frame):
         self.change_to_person(i)
     
     def next_sheet(self):
+        self.save_pdf_scroll()
         if self.sheets.index(self.sheet) == len(self.sheets)-1:
             print("this is the last sheet")
         else:
@@ -399,6 +416,7 @@ class gui(tk.Frame):
             self.get_sheet()
     
     def prev_sheet(self):
+        self.save_pdf_scroll()
         if self.sheets.index(self.sheet) == 0:
             print("this is the first sheet")
         else:
@@ -459,6 +477,7 @@ class gui(tk.Frame):
             self.options[0].focus()
         elif self.sheet != self.sheets[-1]:
             self.next_sheet()
+            self.save_y_scrolls()
             self.change_to_person(0)
             self.options[0].focus()
         else:
@@ -506,6 +525,39 @@ class gui(tk.Frame):
         e.delta = -120
         self.answer_obj.func_scroll(e)
     
+    def _see_code(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.save_pdf_scroll()
+        if self.py_files == None:
+            self.pdf_seeing_code = not self.pdf_seeing_code
+        else:
+            self.pdf_seeing_code += 1
+            if self.pdf_seeing_code == len(self.py_files)+1:
+                self.pdf_seeing_code = 0
+
+        self.set_pdf()
+    
+    def _save_y_scrolls(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        self.save_y_scrolls()
+        
+    def save_y_scrolls(self):
+        np.save(self.path+"y_scrolls",np.array(self.pdf_yscroll))
+        print("Saved y_scrolls")
+        
+    def _load_y_scrolls(self,e):
+        if self.parent.focus_get() == self.no_description or self.parent.focus_get() == self.no_deduction:
+            return
+        l = np.load(self.path+"y_scrolls", allow_pickle = True)
+        self.pdf_yscroll = [list(i) for i in l]
+        
+        i = self.names.index(self.name)
+        self.pdf_obj.canvas.yview_moveto(self.pdf_yscroll[i][self.pdf_seeing_code])
+        print("Loaded y_scrolls")
+        
+    
     def bind_keys(self):
         self.parent.bind("<Return>",self._goto_next)
         self.parent.bind("j",self._prev)
@@ -517,6 +569,9 @@ class gui(tk.Frame):
         self.parent.bind("f",self._scroll_down)
         self.parent.bind("t",self._scroll_up_answer)
         self.parent.bind("g",self._scroll_down_answer)
+        self.parent.bind("c",self._see_code)
+        self.parent.bind("s",self._save_y_scrolls)
+        self.parent.bind("q",self._load_y_scrolls)
         # self.parent.bind("<Up>",self._zoom_in)
         # self.parent.bind("<Down>",self._zoom_out)
     pass
@@ -528,6 +583,7 @@ class app():
                  folder = "",
                  file_template = "scoring_template.xlsx", 
                  file_scoring = "scores_week3.xlsx",
+                 py_files = None,
                  ):
         self.title = "The checker for numerical methods - by Niels Burghoorn"
         
@@ -537,6 +593,8 @@ class app():
         self.folder = folder
         self.answer_pdf = input(f"Make sure you have your answers pdf-file relative in ...{self.path[-25:]}.\nIf it is 'answers.pdf' proceed, else what is its name?:\n")
         self.answer_pdf = self.path+"answers.pdf" if self.answer_pdf == "" else self.path+self.answer_pdf
+        self.py_files = py_files
+        
         self.names = []
         self.sheets = []
         self.sheet_names = []
@@ -684,21 +742,22 @@ class app():
         root = tk.Tk();
         root.title(self.title)
         self.gui = gui(root, self.names, self.sheets, self.sheet_names, 
-                      self.path+self.folder, self.file_scoring, self.answer_pdf)
+                      self.path+self.folder, self.file_scoring, self.answer_pdf,
+                      self.py_files)
         root.mainloop()
         
-def run_convert():
+def run_convert(py_files):
     global names,convert_obj
-    convert_obj = convert_pdfs(path+superfolder+folder)
+    convert_obj = convert_pdfs(path+superfolder+folder, py_files = py_files)
     names = convert_obj.convert()
     
     with open(path+superfolder+"names.txt",'w',encoding='utf-8') as f:
         for name in names:
             f.write(name+"\n")
 
-def run_app():
+def run_app(py_files):
     global app
-    app = app(path,superfolder,folder,file_template,file_scoring)
+    app = app(path,superfolder,folder,file_template,file_scoring,py_files)
     app.pre_dialog()
     app.make_excel()
     app.run()
@@ -718,13 +777,15 @@ if __name__ == "__main__":
     
     path = r"C:\Users\niels\OneDrive\OneDriveDocs\TA\Numerical Methods\student results" + "\\"
     file_template = "scoring_template_timeliness.xlsx" if TIMELINESS else "scoring_template.xlsx" 
-    file_scoring = "scores_intermediate_assignment4.xlsx"
-    superfolder = r"intermediate_assignment4" + "\\"    
-    folder = r"Assignment 4 Download 08 October, 2020 1126"
+    file_scoring = "scores_test.xlsx"
+    superfolder = r"test" + "\\"    
+    folder = r"Assignment 5 Download 20 October, 2020 1858"
     names = None
+    py_files = ["dif","wave"]   
     
-    run_convert()
-    run_app()
-    run_feedback()
-    
+    run_convert(py_files)
+    if input("Run app? (yes/no)\n") == "yes":
+        run_app(py_files)
+    if input("Make feedback? (yes/no)\n") == "yes":
+        run_feedback()    
     

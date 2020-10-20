@@ -9,7 +9,7 @@ import pyperclip
 import os
 
 path = r"C:\Users\niels\OneDrive\OneDriveDocs\TA\Numerical Methods\student results" + "\\"
-superfolder = r"intermediate_assignment4" + "\\" 
+superfolder = r"intermediate_assignment5" + "\\" 
 folder = r"feedback_files" + "\\"
 
 location = path+superfolder+folder
