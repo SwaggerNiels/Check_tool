@@ -598,6 +598,7 @@ class app():
         self.names = []
         self.sheets = []
         self.sheet_names = []
+        self.points = []
         
         self.gui = None
     
@@ -633,7 +634,10 @@ class app():
     
     def split_sheet_names(self):
         '''This splits the sheetnames (questions) into prefices ( e.g.:"1a)" )
-        and the questions (e.g.: "find eigenvalues" )'''
+        and the questions (e.g.: "find eigenvalues" )
+        
+        within the prefices there may be an indication of the number of points
+        in the form of "[x points]" (e.g.: "3b [3 points]")'''
         prefices = []
         for sheet in self.sheets:
             pattern = r"^[^\)]+\)"
@@ -648,6 +652,17 @@ class app():
         
         self.sheet_names = dict(zip(prefices, self.sheets))
         self.sheets = prefices
+    
+    def correct_number_of_points(self):
+        '''Correct the number of points that is attainable per question'''
+        self.points = dict()
+        for sheet,sheet_name in self.sheet_names.items():
+            pattern = r"\[([0-9]+) points\]"
+            obj = re.findall(pattern,sheet_name)
+            if obj != []:
+                self.points[sheet] = obj[0]
+            else:
+                self.points[sheet] = 1
     
     def create_names_and_sheets(self, path):
         qtxt = input(f"Prespecified questions.txt in ...{path[-25:]}? (yes/no):\n")
@@ -670,7 +685,9 @@ class app():
             self.gui.pack()
             root.mainloop()
         
+        print("Pre dialog -------")
         self.split_sheet_names()
+        self.correct_number_of_points()
     
     def make_excel(self):
         '''Make excel file from template. Excel sheets correspond to sheets'''
@@ -723,11 +740,12 @@ class app():
                 scoring.Close(SaveChanges = True)
                 
             
-            #fill sheets
+            #fill sheets (sheet names, person names, number of points per question)
             try:
                 wb = oxl.load_workbook(self.file_scoring)
                 for sheet in wb.sheetnames[1:]:
                     wb[sheet][c(1,1)] = self.sheet_names[sheet]
+                    wb[sheet][c(11,1)] = int(self.points[sheet])
                     for row in range(3,23):
                         if len(self.names) == row-3:
                             break
@@ -773,15 +791,15 @@ def run_feedback():
     fb.write_txts(feedback_folder+"\\")
     
 if __name__ == "__main__":
-    TIMELINESS = True
+    TIMELINESS = False
     
     path = r"C:\Users\niels\OneDrive\OneDriveDocs\TA\Numerical Methods\student results" + "\\"
     file_template = "scoring_template_timeliness.xlsx" if TIMELINESS else "scoring_template.xlsx" 
-    file_scoring = "scores_test.xlsx"
-    superfolder = r"test" + "\\"    
-    folder = r"Assignment 5 Download 20 October, 2020 1858"
+    file_scoring = "scores_assignment4.xlsx"
+    superfolder = r"assignment4" + "\\"
+    folder = r"Assignment 4 Download 21 October, 2020 1014"
     names = None
-    py_files = ["dif","wave"]   
+    py_files = None#["dif","wave"]   
     
     run_convert(py_files)
     if input("Run app? (yes/no)\n") == "yes":
